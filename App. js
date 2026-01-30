@@ -1,1 +1,2675 @@
-kgkgmgmglg
+
+// ===============================
+// GLOBAL STATE MANAGEMENT
+// REPLACE your existing global variables section with this
+// ===============================
+
+/**
+ * Application State Object
+ * Centralizes all application state in one place
+ */
+const AppState = {
+  // Data
+  expenses: [],
+  categoryBudgets: {},
+  recurringExpenses: [],
+  
+  // Settings
+  monthlyBudget: null,
+  
+  // UI State
+  filteredExpenses: null,
+  editingExpenseId: null,
+  
+  // Chart Instances
+  charts: {
+    pie: null,
+    bar: null,
+    line: null
+  },
+  
+  // Cache for performance
+  cache: {
+    lastRenderData: null,
+    lastChartData: null
+  },
+  
+  // Initialization
+  init() {
+    this.loadFromStorage();
+    this.normalizeExpenseIds();
+  },
+  
+  // Load all data from storage
+  loadFromStorage() {
+    this.expenses = storage.loadExpenses();
+    this.monthlyBudget = storage.loadBudget();
+    this.categoryBudgets = storage.loadCategoryBudgets();
+    this.recurringExpenses = storage.loadRecurringExpenses();
+  },
+  
+  // Normalize expense IDs
+  normalizeExpenseIds() {
+    let updated = false;
+    
+    this.expenses = this.expenses.map(exp => {
+      if (!exp.id) {
+        updated = true;
+        return { ...exp, id: generateId() };
+      }
+      return exp;
+    });
+    
+    if (updated) {
+      storage.saveExpenses(this.expenses);
+    }
+  },
+  
+  // Add expense
+  addExpense(expense) {
+    this.expenses.push(expense);
+    this.clearCache();
+  },
+  
+  // Update expense
+  updateExpense(id, updates) {
+    const index = this.expenses.findIndex(e => e.id === id);
+    if (index !== -1) {
+      this.expenses[index] = { ...this.expenses[index], ...updates };
+      this.clearCache();
+      return true;
+    }
+    return false;
+  },
+  
+  // Delete expense
+  deleteExpense(id) {
+    const index = this.expenses.findIndex(e => e.id === id);
+    if (index !== -1) {
+      this.expenses.splice(index, 1);
+      this.clearCache();
+      return true;
+    }
+    return false;
+  },
+  
+  // Get expense by ID
+  getExpense(id) {
+    return this.expenses.find(e => e.id === id);
+  },
+  
+  // Get expenses for rendering (filtered or all)
+  getDisplayExpenses() {
+    return this.filteredExpenses || this.expenses;
+  },
+  
+  // Set monthly budget
+  setMonthlyBudget(budget) {
+    this.monthlyBudget = budget;
+    this.clearCache();
+  },
+  
+  // Set category budget
+  setCategoryBudget(category, budget) {
+    this.categoryBudgets[category] = budget;
+    this.clearCache();
+  },
+  
+  // Add recurring expense
+  addRecurringExpense(expense) {
+    this.recurringExpenses.push(expense);
+  },
+  
+  // Set filtered expenses
+  setFilteredExpenses(expenses) {
+    this.filteredExpenses = expenses;
+  },
+  
+  // Clear filters
+  clearFilters() {
+    this.filteredExpenses = null;
+  },
+  
+  // Clear cache when data changes
+  clearCache() {
+    this.cache.lastRenderData = null;
+    this.cache.lastChartData = null;
+  },
+  
+  // Get current month expenses
+  getCurrentMonthExpenses() {
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+    
+    return this.expenses.filter(exp => {
+      const expDate = DateUtils.parseDate(exp.date);
+      return expDate.getMonth() === currentMonth && 
+             expDate.getFullYear() === currentYear;
+    });
+  },
+  
+  // Get total spending
+  getTotalSpending() {
+    return this.expenses.reduce((sum, e) => sum + e.amount, 0);
+  },
+  
+  // Get current month total
+  getCurrentMonthTotal() {
+    return this.getCurrentMonthExpenses().reduce((sum, e) => sum + e.amount, 0);
+  }
+};
+
+// ===============================
+// BACKWARD COMPATIBILITY
+// Keep these for existing code that references them
+// Gradually migrate to AppState
+// ===============================
+
+// Reference to AppState for backward compatibility
+let expenses = AppState.expenses;
+let monthlyBudget = AppState.monthlyBudget;
+let categoryBudgets = AppState.categoryBudgets;
+let recurringExpenses = AppState.recurringExpenses;
+let filteredExpenses = AppState.filteredExpenses;
+let editingExpenseId = AppState.editingExpenseId;
+
+// Chart references
+let pieChart = AppState.charts.pie;
+let barChart = AppState.charts.bar;
+let lineChart = AppState.charts.line;
+
+// ===============================
+// SYNC HELPERS
+// Keep state object and legacy variables in sync
+// ===============================
+
+function syncStateToGlobals() {
+  expenses = AppState.expenses;
+  monthlyBudget = AppState.monthlyBudget;
+  categoryBudgets = AppState.categoryBudgets;
+  recurringExpenses = AppState.recurringExpenses;
+  filteredExpenses = AppState.filteredExpenses;
+  editingExpenseId = AppState.editingExpenseId;
+  
+  pieChart = AppState.charts.pie;
+  barChart = AppState.charts.bar;
+  lineChart = AppState.charts.line;
+}
+
+function syncGlobalsToState() {
+  AppState.expenses = expenses;
+  AppState.monthlyBudget = monthlyBudget;
+  AppState.categoryBudgets = categoryBudgets;
+  AppState.recurringExpenses = recurringExpenses;
+  AppState.filteredExpenses = filteredExpenses;
+  AppState.editingExpenseId = editingExpenseId;
+  
+  AppState.charts.pie = pieChart;
+  AppState.charts.bar = barChart;
+  AppState.charts.line = lineChart;
+}
+
+// ===============================
+// INIT - Updated to use AppState
+// ===============================
+
+document.addEventListener('DOMContentLoaded', () => {
+  // Initialize state
+  AppState.init();
+  
+  // Sync to global variables for backward compatibility
+  syncStateToGlobals();
+  
+  populateCategoryDropdowns();
+  setupCategoryInputHandlers();
+  setupSmartDateDefaults();
+  setupRealTimeSearch();
+  applyRecurringExpenses();
+  updateMonthlyBudgetStatus();
+  
+  const form = document.getElementById('expense-form');
+  
+  if (!form) {
+    console.error("expense-form not found");
+    return;
+  }
+  
+  form.addEventListener('submit', addExpense);
+  renderExpenses();
+});
+
+function debounce(func, delay) {
+  let timeoutId;
+  return function (...args) {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => func.apply(this, args), delay);
+  };
+}
+
+/**
+ * Check if chart data has changed
+ */
+function hasChartDataChanged() {
+  const currentData = {
+    expenses: AppState.expenses.length,
+    categories: Object.keys(getCategoryTotals()).length,
+    filtered: AppState.filteredExpenses
+      ? AppState.filteredExpenses.length
+      : null
+  };
+
+  const lastData = AppState.cache.lastChartData;
+
+  if (!lastData) {
+    AppState.cache.lastChartData = currentData;
+    return true;
+  }
+
+  const hasChanged =
+    currentData.expenses   !== lastData.expenses ||
+    currentData.categories !== lastData.categories ||
+    currentData.filtered   !== lastData.filtered;
+
+  if (hasChanged) {
+    AppState.cache.lastChartData = currentData;
+  }
+
+  return hasChanged;
+}
+
+const PerformanceMonitor = {
+  timers: {},
+
+  start(label) {
+    this.timers[label] = performance.now();
+  },
+
+  end(label) {
+    if (this.timers[label]) {
+      const duration = performance.now() - this.timers[label];
+      console.log(`⏱️ ${label}: ${duration.toFixed(2)}ms`);
+      delete this.timers[label];
+    }
+  }
+};
+
+
+
+
+// ===============================
+// POPULATE CATEGORY DROPDOWNS
+// ===============================
+
+function populateCategoryDropdowns() {
+  const dropdowns = [
+    'expense-category',
+    'filter-category',
+    'budget-category'
+  ];
+  
+  dropdowns.forEach(dropdownId => {
+    const select = document.getElementById(dropdownId);
+    if (!select) return;
+    
+    // Clear existing options except the first one (placeholder/all)
+    const firstOption = select.options[0];
+    select.innerHTML = '';
+    if (firstOption) {
+      select.appendChild(firstOption);
+    }
+    
+    // Add category options
+    CATEGORIES.forEach(category => {
+      const option = document.createElement('option');
+      option.value = category;
+      option.textContent = category;
+      select.appendChild(option);
+    });
+  });
+}
+
+
+function setupCategoryInputHandlers() {
+  // For Add Expense form
+  const customCategoryInput = document.getElementById('custom-category');
+  const categorySelect = document.getElementById('expense-category');
+  
+  if (customCategoryInput && categorySelect) {
+    customCategoryInput.addEventListener('input', function() {
+      if (this.value.trim()) {
+        categorySelect.value = ''; // Reset to placeholder
+      }
+    });
+    
+    // Optional: Also clear custom input when selecting from dropdown
+    categorySelect.addEventListener('change', function() {
+      if (this.value) {
+        customCategoryInput.value = ''; // Clear custom input
+      }
+    });
+  }
+
+  // For Category Budget form
+  const customBudgetCategoryInput = document.getElementById('custom-budget-category');
+  const budgetCategorySelect = document.getElementById('budget-category');
+  
+  if (customBudgetCategoryInput && budgetCategorySelect) {
+    customBudgetCategoryInput.addEventListener('input', function() {
+      if (this.value.trim()) {
+        budgetCategorySelect.value = ''; // Reset to placeholder
+      }
+    });
+    
+    budgetCategorySelect.addEventListener('change', function() {
+      if (this.value) {
+        customBudgetCategoryInput.value = ''; // Clear custom input
+      }
+    });
+  }
+}
+
+
+
+function autoFillTodayDate(inputId) {
+  const dateInput = document.getElementById(inputId);
+  if (dateInput && !dateInput.value) {
+    dateInput.value = DateUtils.getTodayString();
+  }
+}
+
+function setupSmartDateDefaults() {
+  const expenseDateInput = document.getElementById('expense-date');
+  if (expenseDateInput) {
+    expenseDateInput.value =DateUtils.getTodayString();
+    expenseDateInput.setAttribute('max',DateUtils.getTodayString());
+    
+    expenseDateInput.addEventListener('input', function() {
+      const selectedDate = new Date(this.value);
+      const today = new Date(DateUtils.getTodayString());
+      
+      if (selectedDate > today) {
+        showWarning('Future dates are not allowed. Please select today or a past date.');
+        this.value = DateUtils.getTodayString();
+      }
+    });
+  }
+
+  const editDateInput = document.getElementById('edit-expense-date');
+  if (editDateInput) {
+    editDateInput.setAttribute('max',DateUtils.getTodayString());
+    
+    editDateInput.addEventListener('input', function() {
+      const selectedDate = new Date(this.value);
+      const today = new Date(DateUtils.getTodayString());
+      
+      if (selectedDate > today) {
+        showWarning('Future dates are not allowed. Please select today or a past date.');
+        this.value = DateUtils.getTodayString();
+      }
+    });
+  }
+
+  const fromDateInput = document.getElementById('filter-from-date');
+  const toDateInput = document.getElementById('filter-to-date');
+  
+  if (fromDateInput) {
+    fromDateInput.addEventListener('change', function() {
+      if (toDateInput && !toDateInput.value) {
+        toDateInput.value =DateUtils.getTodayString();
+      }
+    });
+  }
+}
+
+
+
+// ===============================
+// ADD EXPENSE
+// ===============================
+
+function addExpense(e) {
+  e.preventDefault();
+
+  try {
+    const date = document.getElementById('expense-date').value;
+    const amount = document.getElementById('expense-amount').value;
+    const categorySelect = document.getElementById('expense-category').value;
+    const customCategory = document.getElementById('custom-category').value.trim();
+    const notes = document.getElementById('expense-notes').value.trim();
+
+    // Validate inputs
+    const validatedDate = validateDate(date);
+    const validatedAmount = validateAmount(amount);
+    const category = validateCategory(customCategory || categorySelect || "Others");
+
+    const newExpense = {
+      id: generateId(),
+      date: validatedDate,
+      category: category,
+      amount: validatedAmount,
+      notes: notes || ''
+    };
+
+    expenses.push(newExpense);
+
+    if (storage.saveExpenses(expenses)) {
+      updateMonthlyBudgetStatus();
+      e.target.reset();
+      renderExpenses();
+      showSuccess(SUCCESS_MESSAGES.EXPENSE_ADDED);
+    }
+
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+
+function renderExpenses() {
+  const tbody = document.getElementById('expense-table-body');
+  tbody.innerHTML = '';
+
+  const dataToRender = filteredExpenses || expenses;
+  let total = 0;
+
+  dataToRender.forEach(exp => {
+    total += exp.amount;
+
+    const row = document.createElement('tr');
+
+    const dateCell = document.createElement('td');
+    dateCell.textContent = exp.date;
+
+    const categoryCell = document.createElement('td');
+    categoryCell.className = 'expense-category-cell';
+
+    const categoryText = document.createElement('div');
+    categoryText.textContent = exp.category;
+    categoryCell.appendChild(categoryText);
+
+    if (exp.notes && exp.notes.trim()) {
+      const notesSpan = document.createElement('span');
+      notesSpan.className = 'expense-notes';
+      notesSpan.textContent = `📝 ${exp.notes}`;
+      categoryCell.appendChild(notesSpan);
+    }
+
+    const amountCell = document.createElement('td');
+    amountCell.textContent = exp.amount.toFixed(2);
+
+    const actionsCell = document.createElement('td');
+
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.textContent = '✏️ Edit';
+    editBtn.addEventListener('click', () => startEditExpense(exp.id));
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.textContent = '🗑️';
+    deleteBtn.addEventListener('click', () => deleteExpense(exp.id));
+
+    actionsCell.appendChild(editBtn);
+    actionsCell.appendChild(document.createTextNode(' '));
+    actionsCell.appendChild(deleteBtn);
+
+    row.appendChild(dateCell);
+    row.appendChild(categoryCell);
+    row.appendChild(amountCell);
+    row.appendChild(actionsCell);
+
+    tbody.appendChild(row);
+  });
+
+  document.getElementById('total-amount').textContent = total.toFixed(2);
+
+  renderChart();
+  renderInsights();
+  renderAnomalies();
+  renderCategoryBudgetSummary();
+  renderMonthlySummary();
+  renderBEFAMetrics();
+  renderAdvancedAnalytics();
+}
+
+// ===============================
+// TOAST NOTIFICATION SYSTEM
+// ADD these functions to your app.js
+// Place them AFTER your BEFA functions and BEFORE renderExpenses
+// ===============================
+
+/**
+ * Show toast notification
+ * @param {string} message - Message to display
+ * @param {string} type - Type: 'success', 'error', 'warning', 'info'
+ * @param {number} duration - Duration in ms (default: 3000)
+ */
+function showToast(message, type = 'info', duration = 3000) {
+  const container = document.getElementById('toast-container');
+  if (!container) {
+    console.error('Toast container not found!');
+    return;
+  }
+
+  const icons = {
+    success: '✅',
+    error: '❌',
+    warning: '⚠️',
+    info: 'ℹ️'
+  };
+
+  const titles = {
+    success: 'Success',
+    error: 'Error',
+    warning: 'Warning',
+    info: 'Info'
+  };
+
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+
+  toast.innerHTML = `
+    <div class="toast-icon">${icons[type]}</div>
+    <div class="toast-content">
+      <div class="toast-title">${titles[type]}</div>
+      <div class="toast-message">${message}</div>
+    </div>
+    <button class="toast-close" onclick="closeToast(this)">×</button>
+    <div class="toast-progress"></div>
+  `;
+
+  container.appendChild(toast);
+
+  setTimeout(() => {
+    removeToast(toast);
+  }, duration);
+}
+
+function closeToast(button) {
+  const toast = button.closest('.toast');
+  removeToast(toast);
+}
+
+function removeToast(toast) {
+  if (!toast) return;
+  
+  toast.classList.add('removing');
+  setTimeout(() => {
+    if (toast.parentNode) {
+      toast.remove();
+    }
+  }, 300);
+}
+
+function showSuccess(message) {
+  showToast(message, 'success', UI_TIMING.TOAST_DURATION_SUCCESS);
+}
+
+function showError(message) {
+  showToast(message, 'error', UI_TIMING.TOAST_DURATION_ERROR);
+}
+
+function showWarning(message) {
+  showToast(message, 'warning', UI_TIMING.TOAST_DURATION_WARNING);
+}
+
+function showInfo(message) {
+  showToast(message, 'info', UI_TIMING.TOAST_DURATION_INFO);
+}
+// ===============================
+// UPDATE: deleteExpense() - Use custom modal instead of confirm()
+
+// ===============================
+
+function deleteExpense(id) {
+  const index = expenses.findIndex(e => e.id === id);
+  if (index === -1) return;
+
+  const expense = expenses[index];
+
+  // Use custom confirmation modal instead of browser confirm()
+  showConfirmation(
+    'Delete Expense',
+    `Are you sure you want to delete this ${expense.category} expense of ₹${expense.amount.toFixed(2)}?`,
+    () => {
+      // User confirmed - delete the expense
+      expenses.splice(index, 1);
+      
+      if (storage.saveExpenses(expenses)) {
+        updateMonthlyBudgetStatus();
+        renderExpenses();
+        showSuccess(SUCCESS_MESSAGES.EXPENSE_DELETED);
+      }
+    },
+    () => {
+      // User cancelled - do nothing (optional callback)
+      console.log('Delete cancelled');
+    }
+  );
+}
+
+function startEditExpense(id) {
+  const exp = expenses.find(e => e.id === id);
+  if (!exp) return;
+
+  editingExpenseId = id;
+
+  const section = document.getElementById('edit-expense-section');
+
+  document.getElementById('edit-expense-date').value = exp.date;
+  document.getElementById('edit-expense-category').value = exp.category;
+  document.getElementById('edit-expense-amount').value = exp.amount;
+  document.getElementById('edit-expense-notes').value = exp.notes || '';
+
+  section.style.display = "block";
+  section.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function saveEditedExpense() {
+  if (!editingExpenseId) return;
+
+  try {
+    const date = document.getElementById('edit-expense-date').value;
+    const category = document.getElementById('edit-expense-category').value.trim();
+    const amount = document.getElementById('edit-expense-amount').value;
+    const notes = document.getElementById('edit-expense-notes').value.trim();
+
+    const validatedDate = validateDate(date);
+    const validatedCategory = validateCategory(category);
+    const validatedAmount = validateAmount(amount);
+
+    const index = expenses.findIndex(e => e.id === editingExpenseId);
+    if (index === -1) {
+      showError('Expense not found');
+      return;
+    }
+
+    expenses[index] = {
+      ...expenses[index],
+      date: validatedDate,
+      category: validatedCategory,
+      amount: validatedAmount,
+      notes: notes || ''
+    };
+
+    if (storage.saveExpenses(expenses)) {
+      editingExpenseId = null;
+      document.getElementById('edit-expense-section').style.display = "none";
+
+      updateMonthlyBudgetStatus();
+      renderExpenses();
+      showSuccess(SUCCESS_MESSAGES.EXPENSE_UPDATED);
+    }
+
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+function cancelEdit() {
+  editingExpenseId = null;
+  document.getElementById('edit-expense-section').style.display = "none";
+}
+
+// ===============================
+// BUDGET
+// ===============================
+
+function saveBudget() {
+  try {
+    const value = parseFloat(document.getElementById('monthly-budget').value);
+    if (isNaN(value) || value <= 0) {
+      showError('Please enter a valid budget amount');
+      return;
+    }
+    
+    monthlyBudget = value;
+    if (storage.saveBudget(value)) {
+      showSuccess(SUCCESS_MESSAGES.BUDGET_SAVED);
+      renderMonthlySummary();
+    }
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+// ===============================
+// SAVE CATEGORY BUDGET
+// ===============================
+
+function saveCategoryBudget(category, amount) {
+  try {
+    const validatedCategory = validateCategory(category);
+    const validatedAmount = validateAmount(amount);
+    
+    categoryBudgets[validatedCategory] = validatedAmount;
+    
+    if (storage.saveCategoryBudgets(categoryBudgets)) {
+      showSuccess(`Budget set for ${validatedCategory}`);
+      renderCategoryBudgetSummary();
+    }
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+// ===============================
+// HANDLE CATEGORY BUDGET SAVE (UI)
+// ===============================
+
+function handleSaveCategoryBudget() {
+  const selectedCategory = document.getElementById('budget-category').value;
+  const customCategory = document.getElementById('custom-budget-category').value.trim();
+  const amount = document.getElementById('category-budget-amount').value;
+  
+  const category = customCategory || selectedCategory;
+  
+  if (!category) {
+    showError('Please select or enter a category');
+    return;
+  }
+  
+  saveCategoryBudget(category, amount);
+  
+  // Reset inputs
+  document.getElementById('budget-category').value = "";
+  document.getElementById('custom-budget-category').value = "";
+  document.getElementById('category-budget-amount').value = "";
+}
+
+function updateMonthlyBudgetStatus() {
+  const total = expenses.reduce((sum, e) => sum + e.amount, 0);
+  checkBudget(total);
+}
+
+function checkBudget(total) {
+  const msg = document.getElementById('budget-warning');
+
+  if (!monthlyBudget) {
+    msg.textContent = "";
+    return;
+  }
+
+  const budget = Number(monthlyBudget);
+  const difference = total - budget;
+  const percent = (total / budget) * 100;
+
+  if (difference > 0) {
+    msg.textContent =
+      `⚠ Budget exceeded by ₹${difference.toFixed(2)} ` +
+      `(Spent ₹${total.toFixed(2)} of ₹${budget.toFixed(2)})`;
+    msg.style.color = "red";
+  } else if (percent >= ANALYTICS_THRESHOLDS.BUDGET_WARNING_THRESHOLD)  {
+    msg.textContent =
+      `⚠ Nearing budget limit ` +
+      `(Spent ₹${total.toFixed(2)} of ₹${budget.toFixed(2)})`;
+    msg.style.color = "orange";
+  } else {
+    msg.textContent =
+      `✅ Budget under control ` +
+      `(Spent ₹${total.toFixed(2)} of ₹${budget.toFixed(2)})`;
+    msg.style.color = "green";
+  }
+}
+
+function updateMonthlyBudgetStatus() {
+  const total = expenses.reduce((sum, e) => sum + e.amount, 0);
+  checkBudget(total);
+}
+
+// ===============================
+// ADD RECURRING EXPENSE (UI)
+// ===============================
+
+function addRecurringExpense() {
+  try {
+    const category = document.getElementById('recurring-category').value.trim();
+    const amount = document.getElementById('recurring-amount').value;
+    
+    const validatedCategory = validateCategory(category);
+    const validatedAmount = validateAmount(amount);
+    
+    recurringExpenses.push({
+      category: validatedCategory,
+      amount: validatedAmount
+    });
+    
+    if (storage.saveRecurringExpenses(recurringExpenses)) {
+      document.getElementById('recurring-category').value = "";
+      document.getElementById('recurring-amount').value = "";
+      showSuccess(ERROR_MESSAGES.RECURRING_ADDED);
+    }
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+// ===============================
+// HELPER: AGGREGATE EXPENSES
+// ===============================
+
+function aggregateExpenses(mode) {
+  const map = {};
+  
+  expenses.forEach(exp => {
+    let key;
+    if (mode === "daily") {
+      key = exp.date;
+    }
+    if (mode === "weekly") {
+      const d = new Date(exp.date);
+      const week = Math.ceil(d.getDate() / 7);
+      key = `${d.getFullYear()}-W${week}`;
+    }
+    if (mode === "monthly") {
+      key = exp.date.slice(0, 7);
+    }
+    map[key] = (map[key] || 0) + exp.amount;
+  });
+  
+  return {
+    labels: Object.keys(map).sort(),
+    data: Object.values(map)
+  };
+}
+
+// ===============================
+// HELPER: CURRENT MONTH KEY
+// ===============================
+
+function getCurrentMonthKey() {
+  const now = new Date();
+  return `${now.getFullYear()}-${now.getMonth() + 1}`;
+}
+
+// ===============================
+// HELPER: CATEGORY TOTALS (ACTUAL)
+// ===============================
+
+function getCategoryTotals() {
+  const totals = {};
+  expenses.forEach(exp => {
+    totals[exp.category] = (totals[exp.category] || 0) + exp.amount;
+  });
+  return totals;
+}
+
+// ===============================
+// APPLY RECURRING EXPENSES
+// ===============================
+
+function applyRecurringExpenses() {
+  const monthKey = getCurrentMonthKey();
+  const appliedMonth = storage.loadRecurringAppliedMonth();
+  
+  if (appliedMonth === monthKey) return;
+  
+  const today = new Date().toISOString().slice(0, 10);
+  
+  recurringExpenses.forEach(rec => {
+    expenses.push({
+      id: generateId(),
+      date: today,
+      category: rec.category,
+      amount: rec.amount
+    });
+  });
+  
+  storage.saveRecurringAppliedMonth(monthKey);
+  storage.saveExpenses(expenses);
+  filteredExpenses = null;
+  updateMonthlyBudgetStatus();
+}
+
+// ===============================
+// HELPER: CATEGORY BUDGET ANALYSIS
+// ===============================
+
+function analyzeCategoryBudgets() {
+  const results = [];
+  const categoryTotals = getCategoryTotals();
+  
+  for (const category in categoryBudgets) {
+    const budget = categoryBudgets[category];
+    const spent = categoryTotals[category] || 0;
+    const utilization = (spent / budget) * 100;
+    
+    let status = "under-control";
+    if (utilization >= 100) {
+      status = "exceeded";
+    } else if (utilization >= 80) {
+      status = "near-limit";
+    }
+    
+    results.push({
+      category,
+      budget,
+      spent,
+      utilization,
+      status
+    });
+  }
+  
+  return results;
+}
+// ===============================
+// BEFA FINANCIAL METRICS
+// ===============================
+
+/**
+ * Calculate Savings Rate
+ * BEFA Concept: Savings behavior analysis
+ * Formula: (Budget - Spent) / Budget * 100
+ */
+function calculateSavingsRate() {
+  if (!monthlyBudget || monthlyBudget <= 0) {
+    return null;
+  }
+
+  const currentMonthExpenses = getCurrentMonthExpenses();
+  const totalSpent = currentMonthExpenses.reduce((sum, e) => sum + e.amount, 0);
+  const budget = Number(monthlyBudget);
+  
+  const savingsRate = ((budget - totalSpent) / budget) * 100;
+  
+  return {
+    rate: savingsRate,
+    saved: budget - totalSpent,
+    spent: totalSpent,
+    budget: budget
+  };
+}
+
+/**
+ * Calculate Budget Compliance Score
+ * BEFA Concept: Performance measurement
+ * Score based on: budget adherence, anomalies, consistency
+ */
+function calculateBudgetComplianceScore() {
+  let score = 100;
+  
+  const currentMonthExpenses = getCurrentMonthExpenses();
+  const totalSpent = currentMonthExpenses.reduce((sum, e) => sum + e.amount, 0);
+  
+  // Factor 1: Budget adherence (40 points)
+  if (monthlyBudget && monthlyBudget > 0) {
+    const budgetUsedPercent = (totalSpent / monthlyBudget) * 100;
+    
+    if (budgetUsedPercent > 100) {
+      score -= 40; // Exceeded budget
+    } else if (budgetUsedPercent > 90) {
+      score -= 30; // Very close to limit
+    } else if (budgetUsedPercent > 80) {
+      score -= 20; // Close to limit
+    } else if (budgetUsedPercent > 70) {
+      score -= 10; // Approaching limit
+    }
+  }
+  
+  // Factor 2: Anomalies (30 points)
+  const anomalies = detectAnomalies();
+  score -= Math.min(30, anomalies.length * 10);
+  
+  // Factor 3: Category budget compliance (30 points)
+  if (Object.keys(categoryBudgets).length > 0) {
+    const analysis = analyzeCategoryBudgets();
+    const exceededCategories = analysis.filter(a => a.status === 'exceeded').length;
+    const nearLimitCategories = analysis.filter(a => a.status === 'near-limit').length;
+    
+    score -= (exceededCategories * 15);
+    score -= (nearLimitCategories * 5);
+  }
+  
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+/**
+ * Calculate Expense-to-Budget Ratio by Category
+ * BEFA Concept: Resource allocation efficiency
+ */
+function calculateCategoryExpenseRatios() {
+  if (Object.keys(categoryBudgets).length === 0) {
+    return null;
+  }
+  
+  const currentMonthExpenses = getCurrentMonthExpenses();
+  const categoryTotals = {};
+  
+  currentMonthExpenses.forEach(exp => {
+    categoryTotals[exp.category] = (categoryTotals[exp.category] || 0) + exp.amount;
+  });
+  
+  const ratios = [];
+  
+  for (const category in categoryBudgets) {
+    const budget = categoryBudgets[category];
+    const spent = categoryTotals[category] || 0;
+    const ratio = (spent / budget) * 100;
+    
+    ratios.push({
+      category,
+      budget,
+      spent,
+      ratio: ratio,
+      remaining: budget - spent,
+      status: ratio > 100 ? 'exceeded' : ratio > 80 ? 'warning' : 'good'
+    });
+  }
+  
+  return ratios.sort((a, b) => b.ratio - a.ratio);
+}
+
+/**
+ * Calculate Burn Rate (Daily Average Spending)
+ * BEFA Concept: Cash flow analysis
+ */
+function calculateBurnRate() {
+  const currentMonthExpenses = getCurrentMonthExpenses();
+  
+  if (currentMonthExpenses.length === 0) {
+    return {
+      dailyAverage: 0,
+      totalSpent: 0,
+      daysElapsed: 0
+    };
+  }
+  
+  const totalSpent = currentMonthExpenses.reduce((sum, e) => sum + e.amount, 0);
+  const now = new Date();
+  const currentDay = now.getDate();
+  
+  const dailyAverage = totalSpent / currentDay;
+  
+  return {
+    dailyAverage,
+    totalSpent,
+    daysElapsed: currentDay
+  };
+}
+
+/**
+ * Project Month-End Spending
+ * BEFA Concept: Forecasting
+ */
+function projectMonthEndSpending() {
+  const burnRate = calculateBurnRate();
+  
+  if (burnRate.daysElapsed === 0) {
+    return null;
+  }
+  
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth();
+  const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+  
+  const projectedTotal = burnRate.dailyAverage * daysInMonth;
+  const daysRemaining = daysInMonth - burnRate.daysElapsed;
+  const remainingSpend = burnRate.dailyAverage * daysRemaining;
+  
+  return {
+    projectedTotal,
+    currentSpent: burnRate.totalSpent,
+    remainingSpend,
+    daysRemaining,
+    dailyAverage: burnRate.dailyAverage,
+    willExceedBudget: monthlyBudget ? projectedTotal > monthlyBudget : false,
+    excessAmount: monthlyBudget ? Math.max(0, projectedTotal - monthlyBudget) : 0
+  };
+}
+
+/**
+ * Get current month expenses
+ * Helper function for BEFA calculations
+ */
+function getCurrentMonthExpenses() {
+  const now = new Date();
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+  
+  return expenses.filter(exp => {
+    const expDate = new Date(exp.date);
+    return expDate.getMonth() === currentMonth && 
+           expDate.getFullYear() === currentYear;
+  });
+}
+
+// ===============================
+// ADVANCED ANALYTICS - PART 1
+// Week-over-Week & Spending Patterns
+// ADD these functions after your BEFA metrics functions
+// ===============================
+
+/**
+ * Get week number in year
+ */
+function getWeekNumber(date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + 4 - (d.getDay() || 7));
+  const yearStart = new Date(d.getFullYear(), 0, 1);
+  const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  return weekNo;
+}
+
+/**
+ * Get date range for a specific week
+ */
+function getWeekDateRange(year, weekNumber) {
+  const firstDayOfYear = new Date(year, 0, 1);
+  const daysOffset = (weekNumber - 1) * 7;
+  const weekStart = new Date(firstDayOfYear.setDate(firstDayOfYear.getDate() + daysOffset));
+  
+  // Adjust to Monday
+  const day = weekStart.getDay();
+  const diff = weekStart.getDate() - day + (day === 0 ? -6 : 1);
+  const monday = new Date(weekStart.setDate(diff));
+  
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  
+  return { start: monday, end: sunday };
+}
+
+/**
+ * Calculate Week-over-Week Comparison
+ * BEFA Concept: Comparative analysis
+ */
+function calculateWeekOverWeekComparison() {
+  const today = new Date();
+  const currentYear = today.getFullYear();
+  const currentWeek = getWeekNumber(today);
+  
+  // Get current week expenses
+  const currentWeekRange = getWeekDateRange(currentYear, currentWeek);
+  const currentWeekExpenses = expenses.filter(exp => {
+    const expDate = new Date(exp.date);
+    return expDate >= currentWeekRange.start && expDate <= currentWeekRange.end;
+  });
+  
+  // Get last week expenses
+  const lastWeekRange = getWeekDateRange(currentYear, currentWeek - 1);
+  const lastWeekExpenses = expenses.filter(exp => {
+    const expDate = new Date(exp.date);
+    return expDate >= lastWeekRange.start && expDate <= lastWeekRange.end;
+  });
+  
+  const currentWeekTotal = currentWeekExpenses.reduce((sum, e) => sum + e.amount, 0);
+  const lastWeekTotal = lastWeekExpenses.reduce((sum, e) => sum + e.amount, 0);
+  
+  const difference = currentWeekTotal - lastWeekTotal;
+  const percentChange = lastWeekTotal > 0 
+    ? ((difference / lastWeekTotal) * 100) 
+    : 0;
+  
+  // Category breakdown
+  const currentWeekByCategory = {};
+  const lastWeekByCategory = {};
+  
+  currentWeekExpenses.forEach(exp => {
+    currentWeekByCategory[exp.category] = (currentWeekByCategory[exp.category] || 0) + exp.amount;
+  });
+  
+  lastWeekExpenses.forEach(exp => {
+    lastWeekByCategory[exp.category] = (lastWeekByCategory[exp.category] || 0) + exp.amount;
+  });
+  
+  return {
+    currentWeek: {
+      total: currentWeekTotal,
+      count: currentWeekExpenses.length,
+      byCategory: currentWeekByCategory,
+      range: currentWeekRange
+    },
+    lastWeek: {
+      total: lastWeekTotal,
+      count: lastWeekExpenses.length,
+      byCategory: lastWeekByCategory,
+      range: lastWeekRange
+    },
+    difference,
+    percentChange,
+    trend: difference > 0 ? 'increase' : difference < 0 ? 'decrease' : 'stable'
+  };
+}
+
+/**
+ * Detect Spending Patterns
+ * BEFA Concept: Behavioral analysis
+ */
+function detectSpendingPatterns() {
+  if (expenses.length < 7) {
+    return null; // Need at least a week of data
+  }
+  
+  // Analyze by day of week
+  const dayTotals = {
+    0: { name: 'Sunday', total: 0, count: 0 },
+    1: { name: 'Monday', total: 0, count: 0 },
+    2: { name: 'Tuesday', total: 0, count: 0 },
+    3: { name: 'Wednesday', total: 0, count: 0 },
+    4: { name: 'Thursday', total: 0, count: 0 },
+    5: { name: 'Friday', total: 0, count: 0 },
+    6: { name: 'Saturday', total: 0, count: 0 }
+  };
+  
+  expenses.forEach(exp => {
+    const day = new Date(exp.date).getDay();
+    dayTotals[day].total += exp.amount;
+    dayTotals[day].count += 1;
+  });
+  
+  // Calculate averages
+  Object.keys(dayTotals).forEach(day => {
+    dayTotals[day].average = dayTotals[day].count > 0 
+      ? dayTotals[day].total / dayTotals[day].count 
+      : 0;
+  });
+  
+  // Find peak spending day
+  const peakDay = Object.values(dayTotals).reduce((max, day) => 
+    day.total > max.total ? day : max
+  , dayTotals[0]);
+  
+  // Find lowest spending day
+  const lowestDay = Object.values(dayTotals).reduce((min, day) => 
+    day.count > 0 && day.total < min.total ? day : min
+  , peakDay);
+  
+  // Weekend vs Weekday analysis
+  const weekendTotal = dayTotals[0].total + dayTotals[6].total;
+  const weekendCount = dayTotals[0].count + dayTotals[6].count;
+  const weekdayTotal = Object.keys(dayTotals)
+    .filter(d => d > 0 && d < 6)
+    .reduce((sum, d) => sum + dayTotals[d].total, 0);
+  const weekdayCount = Object.keys(dayTotals)
+    .filter(d => d > 0 && d < 6)
+    .reduce((sum, d) => sum + dayTotals[d].count, 0);
+  
+  const weekendAverage = weekendCount > 0 ? weekendTotal / weekendCount : 0;
+  const weekdayAverage = weekdayCount > 0 ? weekdayTotal / weekdayCount : 0;
+  
+  // Time-based patterns (morning, afternoon, evening)
+  // Note: This would require time data, so we'll keep it simple
+  
+  return {
+    byDay: dayTotals,
+    peakDay: {
+      name: peakDay.name,
+      total: peakDay.total,
+      average: peakDay.average
+    },
+    lowestDay: {
+      name: lowestDay.name,
+      total: lowestDay.total,
+      average: lowestDay.average
+    },
+    weekendVsWeekday: {
+      weekendAverage,
+      weekdayAverage,
+      tendency: weekendAverage > weekdayAverage ? 'weekend' : 'weekday'
+    }
+  };
+}
+
+/**
+ * Get spending insights from patterns
+ */
+function getPatternInsights(patterns) {
+  if (!patterns) return [];
+  
+  const insights = [];
+  
+  // Peak day insight
+  insights.push({
+    type: 'peak-day',
+    icon: '📊',
+    title: 'Peak Spending Day',
+    message: `You tend to spend most on ${patterns.peakDay.name}s (₹${patterns.peakDay.total.toFixed(2)} total)`
+  });
+  
+  // Weekend vs weekday
+  if (patterns.weekendVsWeekday.tendency === 'weekend') {
+    const diff = patterns.weekendVsWeekday.weekendAverage - patterns.weekendVsWeekday.weekdayAverage;
+    insights.push({
+      type: 'weekend-spending',
+      icon: '🎉',
+      title: 'Weekend Spending Pattern',
+      message: `You spend ₹${diff.toFixed(2)} more per day on weekends compared to weekdays`
+    });
+  } else if (patterns.weekendVsWeekday.weekdayAverage > patterns.weekendVsWeekday.weekendAverage) {
+    insights.push({
+      type: 'weekday-spending',
+      icon: '💼',
+      title: 'Weekday Spending Pattern',
+      message: `Your weekday expenses are higher, likely due to work-related costs`
+    });
+  }
+  
+  // Consistency check
+  const dayAverages = Object.values(patterns.byDay).map(d => d.average).filter(a => a > 0);
+  const avgOfAverages = dayAverages.reduce((sum, a) => sum + a, 0) / dayAverages.length;
+  const variance = dayAverages.reduce((sum, a) => sum + Math.pow(a - avgOfAverages, 2), 0) / dayAverages.length;
+  const stdDev = Math.sqrt(variance);
+  
+  if (stdDev < avgOfAverages * 0.3) {
+    insights.push({
+      type: 'consistent',
+      icon: '✅',
+      title: 'Consistent Spending',
+      message: 'Your daily spending is fairly consistent throughout the week'
+    });
+  } else {
+    insights.push({
+      type: 'inconsistent',
+      icon: '⚠️',
+      title: 'Variable Spending',
+      message: 'Your spending varies significantly across different days'
+    });
+  }
+  
+  return insights;
+}
+
+// ===============================
+// ADVANCED ANALYTICS - PART 2
+// Budget Recommendations & Year-to-Date Summary
+// ADD these functions after the spending patterns functions
+// ===============================
+
+/**
+ * Generate Smart Category Budget Recommendations
+ * BEFA Concept: Budget optimization
+ */
+function generateBudgetRecommendations() {
+  if (expenses.length < 10) {
+    return null; // Need sufficient data for recommendations
+  }
+  
+  // Get last 3 months of data for better recommendations
+  const threeMonthsAgo = new Date();
+  threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+  
+  const recentExpenses = expenses.filter(exp => {
+    const expDate = new Date(exp.date);
+    return expDate >= threeMonthsAgo;
+  });
+  
+  // Calculate average spending per category
+  const categoryStats = {};
+  
+  recentExpenses.forEach(exp => {
+    if (!categoryStats[exp.category]) {
+      categoryStats[exp.category] = {
+        total: 0,
+        count: 0,
+        amounts: []
+      };
+    }
+    categoryStats[exp.category].total += exp.amount;
+    categoryStats[exp.category].count += 1;
+    categoryStats[exp.category].amounts.push(exp.amount);
+  });
+  
+  // Calculate recommendations
+  const recommendations = [];
+  
+  Object.keys(categoryStats).forEach(category => {
+    const stats = categoryStats[category];
+    const average = stats.total / stats.count;
+    
+    // Calculate standard deviation for variability
+    const mean = average;
+    const variance = stats.amounts.reduce((sum, amount) => {
+      return sum + Math.pow(amount - mean, 2);
+    }, 0) / stats.count;
+    const stdDev = Math.sqrt(variance);
+    
+    // Recommend budget = average + 1.5 * standard deviation (covers 93% of cases)
+    const recommendedBudget = Math.ceil((average + (stdDev * 1.5)) / 100) * 100; // Round to nearest 100
+    
+    // Get current budget if exists
+    const currentBudget = categoryBudgets[category] || null;
+    
+    // Determine if current budget is adequate
+    let status = 'none';
+    let message = '';
+    
+    if (currentBudget) {
+      if (currentBudget < recommendedBudget * 0.8) {
+        status = 'too-low';
+        message = 'Current budget may be insufficient';
+      } else if (currentBudget > recommendedBudget * 1.3) {
+        status = 'too-high';
+        message = 'Current budget has room to optimize';
+      } else {
+        status = 'optimal';
+        message = 'Current budget is well-calibrated';
+      }
+    } else {
+      status = 'not-set';
+      message = 'No budget set yet';
+    }
+    
+    recommendations.push({
+      category,
+      currentBudget,
+      recommendedBudget,
+      averageSpending: average,
+      variability: stdDev,
+      transactionCount: stats.count,
+      status,
+      message,
+      confidence: stats.count >= 5 ? 'high' : stats.count >= 3 ? 'medium' : 'low'
+    });
+  });
+  
+  // Sort by total spending (most important categories first)
+  recommendations.sort((a, b) => 
+    (categoryStats[b.category].total) - (categoryStats[a.category].total)
+  );
+  
+  return recommendations;
+}
+
+/**
+ * Calculate Year-to-Date Summary
+ * BEFA Concept: Long-term analysis
+ */
+function calculateYearToDateSummary() {
+  const today = new Date();
+  const currentYear = today.getFullYear();
+  const yearStart = new Date(currentYear, 0, 1);
+  
+  // Filter expenses for current year
+  const yearExpenses = expenses.filter(exp => {
+    const expDate = new Date(exp.date);
+    return expDate.getFullYear() === currentYear;
+  });
+  
+  if (yearExpenses.length === 0) {
+    return null;
+  }
+  
+  // Calculate totals
+  const totalSpent = yearExpenses.reduce((sum, e) => sum + e.amount, 0);
+  const totalTransactions = yearExpenses.length;
+  
+  // Monthly breakdown
+  const monthlyTotals = {};
+  for (let i = 0; i < 12; i++) {
+    monthlyTotals[i] = 0;
+  }
+  
+  yearExpenses.forEach(exp => {
+    const month = new Date(exp.date).getMonth();
+    monthlyTotals[month] += exp.amount;
+  });
+  
+  // Calculate how many months have data
+  const monthsWithData = Object.values(monthlyTotals).filter(total => total > 0).length;
+  const averageMonthlySpending = monthsWithData > 0 ? totalSpent / monthsWithData : 0;
+  
+  // Category breakdown
+  const categoryTotals = {};
+  yearExpenses.forEach(exp => {
+    categoryTotals[exp.category] = (categoryTotals[exp.category] || 0) + exp.amount;
+  });
+  
+  // Top categories
+  const topCategories = Object.entries(categoryTotals)
+    .map(([category, total]) => ({
+      category,
+      total,
+      percentage: (total / totalSpent) * 100
+    }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 5);
+  
+  // Projected year-end total
+  const currentMonth = today.getMonth();
+  const monthsRemaining = 12 - (currentMonth + 1);
+  const projectedYearEnd = totalSpent + (averageMonthlySpending * monthsRemaining);
+  
+  // Compare with budget (if yearly budget exists)
+  const yearlyBudget = monthlyBudget ? monthlyBudget * 12 : null;
+  
+  // Find best and worst months
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const monthsData = Object.entries(monthlyTotals)
+    .filter(([month, total]) => total > 0)
+    .map(([month, total]) => ({
+      month: parseInt(month),
+      name: monthNames[month],
+      total
+    }));
+  
+  const bestMonth = monthsData.length > 0 
+    ? monthsData.reduce((min, m) => m.total < min.total ? m : min)
+    : null;
+  
+  const worstMonth = monthsData.length > 0
+    ? monthsData.reduce((max, m) => m.total > max.total ? m : max)
+    : null;
+  
+  return {
+    year: currentYear,
+    totalSpent,
+    totalTransactions,
+    averageMonthlySpending,
+    monthsWithData,
+    monthlyTotals,
+    topCategories,
+    projectedYearEnd,
+    yearlyBudget,
+    bestMonth,
+    worstMonth,
+    averagePerTransaction: totalSpent / totalTransactions
+  };
+}
+
+/**
+ * Generate comprehensive financial health report
+ */
+function generateFinancialHealthReport() {
+  const weekComparison = calculateWeekOverWeekComparison();
+  const patterns = detectSpendingPatterns();
+  const recommendations = generateBudgetRecommendations();
+  const ytdSummary = calculateYearToDateSummary();
+  
+  return {
+    weekComparison,
+    patterns,
+    patternInsights: patterns ? getPatternInsights(patterns) : [],
+    recommendations,
+    ytdSummary,
+    generatedAt: new Date().toISOString()
+  };
+}
+
+// ===============================
+// TOAST NOTIFICATION SYSTEM
+// ===============================
+
+function showToast(message, type = 'info', duration = 3000) {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+
+  const icons = {
+    success: '✅',
+    error: '❌',
+    warning: '⚠️',
+    info: 'ℹ️'
+  };
+
+  const titles = {
+    success: 'Success',
+    error: 'Error',
+    warning: 'Warning',
+    info: 'Info'
+  };
+
+  toast.innerHTML = `
+    <div class="toast-icon">${icons[type]}</div>
+    <div class="toast-content">
+      <div class="toast-title">${titles[type]}</div>
+      <div class="toast-message">${message}</div>
+    </div>
+    <button class="toast-close" onclick="closeToast(this)">×</button>
+    <div class="toast-progress"></div>
+  `;
+
+  container.appendChild(toast);
+
+  setTimeout(() => {
+    removeToast(toast);
+  }, duration);
+}
+
+function closeToast(button) {
+  const toast = button.closest('.toast');
+  removeToast(toast);
+}
+
+function removeToast(toast) {
+  if (!toast) return;
+  toast.classList.add('removing');
+  setTimeout(() => toast.remove(), 300);
+}
+
+function showSuccess(message) {
+  showToast(message, 'success', 3000);
+}
+
+function showError(message) {
+  showToast(message, 'error', 4000);
+}
+
+function showWarning(message) {
+  showToast(message, 'warning', 3500);
+}
+
+function showInfo(message) {
+  showToast(message, 'info', 3000);
+}
+function showConfirmation(title, message, onConfirm, onCancel = null) {
+  const modal = document.getElementById('confirmation-modal');
+  const modalTitle = document.getElementById('modal-title');
+  const modalMessage = document.getElementById('modal-message');
+  const confirmBtn = document.getElementById('modal-confirm');
+  const cancelBtn = document.getElementById('modal-cancel');
+
+  if (!modal) return;
+
+  // Set content
+  modalTitle.textContent = title;
+  modalMessage.textContent = message;
+
+  // Show modal
+  modal.style.display = 'flex';
+
+  // Handle confirm
+  const handleConfirm = () => {
+    closeModal();
+    if (onConfirm) onConfirm();
+  };
+
+  // Handle cancel
+  const handleCancel = () => {
+    closeModal();
+    if (onCancel) onCancel();
+  };
+
+  // Close modal
+  const closeModal = () => {
+    modal.style.display = 'none';
+    confirmBtn.removeEventListener('click', handleConfirm);
+    cancelBtn.removeEventListener('click', handleCancel);
+    modal.removeEventListener('click', handleOverlayClick);
+  };
+
+  // Close on overlay click
+  const handleOverlayClick = (e) => {
+    if (e.target === modal) {
+      handleCancel();
+    }
+  };
+
+  // Remove old listeners and add new ones
+  const newConfirmBtn = confirmBtn.cloneNode(true);
+  const newCancelBtn = cancelBtn.cloneNode(true);
+  confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
+  cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
+
+  document.getElementById('modal-confirm').addEventListener('click', handleConfirm);
+  document.getElementById('modal-cancel').addEventListener('click', handleCancel);
+  modal.addEventListener('click', handleOverlayClick);
+
+  // Focus on cancel button (safer default)
+  document.getElementById('modal-cancel').focus();
+
+  // ESC key to cancel
+  const handleEscape = (e) => {
+    if (e.key === 'Escape') {
+      handleCancel();
+      document.removeEventListener('keydown', handleEscape);
+    }
+  };
+  document.addEventListener('keydown', handleEscape);
+}
+
+
+// ===============================
+// HELPER: GENERATE SPENDING INSIGHTS
+// ===============================
+
+function generateInsights() {
+  const insights = [];
+  
+  if (expenses.length === 0) {
+    insights.push("Start adding expenses to see personalized insights.");
+    return insights;
+  }
+  
+  const categoryTotals = {};
+  let totalSpent = 0;
+  
+  expenses.forEach(exp => {
+    categoryTotals[exp.category] = (categoryTotals[exp.category] || 0) + exp.amount;
+    totalSpent += exp.amount;
+  });
+  
+  const topCategory = Object.entries(categoryTotals)
+    .sort((a, b) => b[1] - a[1])[0];
+  
+  if (topCategory) {
+    insights.push(
+      `You're currently spending the most on ${topCategory[0]}.`
+    );
+  }
+  
+  const averageExpense = totalSpent / expenses.length;
+  insights.push(
+    `On average, each expense comes to about ₹${averageExpense.toFixed(2)}.`
+  );
+  
+  if (expenses.length >= 5) {
+    insights.push(
+      "Your spending pattern looks fairly consistent over time."
+    );
+  }
+  
+  const anomalies = detectAnomalies();
+  if (anomalies.length > 0) {
+    insights.push(
+      `There ${anomalies.length === 1 ? "is" : "are"} ${anomalies.length} unusually high expense${anomalies.length > 1 ? "s" : ""} worth reviewing.`
+    );
+  }
+  
+  const addedCategories = new Set();
+  
+  if (Object.keys(categoryBudgets).length === 0) {
+    return insights;
+  }
+  
+  const budgetAnalysis = analyzeCategoryBudgets();
+  budgetAnalysis.forEach(item => {
+    if (item.status !== "under-control" && !addedCategories.has(item.category)) {
+      addedCategories.add(item.category);
+      if (item.status === "exceeded") {
+        insights.push(
+          `Your ${item.category} spending has exceeded the planned budget.`
+        );
+      } else if (item.status === "near-limit") {
+        insights.push(
+          `You are close to the budget limit for ${item.category}.`
+        );
+      }
+    }
+  });
+  
+  return insights;
+}
+
+// ===============================
+// HELPER: DETECT ANOMALIES
+// ===============================
+
+function detectAnomalies() {
+  if (expenses.length < 3) return [];
+  
+  const total = expenses.reduce((sum, e) => sum + e.amount, 0);
+  const average = total / expenses.length;
+  
+ return expenses.filter(exp => exp.amount > average * ANALYTICS_THRESHOLDS.ANOMALY_THRESHOLD); 
+}
+
+// ===============================
+// APPLY SEARCH & FILTERS
+// ===============================
+
+  const debouncedFilter = debounce(function () {
+  const searchText = document
+    .getElementById('search-text')
+    .value
+    .trim()
+    .toLowerCase();
+
+  const fromDate = document.getElementById('filter-from-date').value;
+  const toDate   = document.getElementById('filter-to-date').value;
+  const category = document.getElementById('filter-category').value;
+
+  // Start with all expenses
+  let result = [...AppState.expenses];
+
+  // Search
+  if (searchText) {
+    result = result.filter(exp =>
+      exp.category.toLowerCase().includes(searchText) ||
+      (exp.notes && exp.notes.toLowerCase().includes(searchText))
+    );
+  }
+
+  // Date filter
+  if (fromDate) {
+    result = result.filter(exp =>
+      DateUtils.compareDates(exp.date, fromDate) >= 0
+    );
+  }
+
+  if (toDate) {
+    result = result.filter(exp =>
+      DateUtils.compareDates(exp.date, toDate) <= 0
+    );
+  }
+
+  // Category filter (only if not searching)
+  if (!searchText && category) {
+    result = result.filter(exp => exp.category === category);
+  }
+
+  AppState.setFilteredExpenses(result);
+
+  // Sync to legacy variable
+  filteredExpenses = AppState.filteredExpenses;
+
+  renderExpenses();
+
+const expenseSection = document.getElementById('expense-list-section');
+if (expenseSection) {
+  expenseSection.scrollIntoView({ 
+    behavior: 'smooth', 
+    block: 'start' 
+  });
+}
+}, UI_TIMING.DEBOUNCE_DELAY);
+
+// Public function that calls debounced version
+function applyFilters() {
+  debouncedFilter();
+}
+   
+  
+  
+
+// ===============================
+// CLEAR FILTERS
+// ===============================
+
+function clearFilters() {
+  AppState.clearFilters();
+  filteredExpenses = null;
+
+  document.getElementById('search-text').value = '';
+  document.getElementById('filter-from-date').value = '';
+  document.getElementById('filter-to-date').value = '';
+  document.getElementById('filter-category').value = '';
+
+  renderExpenses();
+  //console.log('🔍 Filters cleared');
+}
+
+
+
+function setupRealTimeSearch() {
+  const searchInput = document.getElementById('search-text');
+
+  if (searchInput) {
+    // Remove any existing listeners
+    searchInput.removeEventListener('input', applyFilters);
+
+    // Add debounced listener
+    searchInput.addEventListener('input', applyFilters);
+
+    //console.log('✅ Real-time search enabled (debounced)');
+  }
+}
+// ===============================
+// RENDER INSIGHTS
+// ===============================
+
+function renderInsights() {
+  const insightsList = document.getElementById('insights-list');
+  if (!insightsList) return;
+  
+  insightsList.innerHTML = "";
+  
+  const insights = generateInsights();
+  insights.forEach(text => {
+    const li = document.createElement('li');
+    li.textContent = text;
+    insightsList.appendChild(li);
+  });
+}
+
+// ===============================
+// RENDER ANOMALIES (SEPARATE TABLE)
+// ===============================
+
+function renderAnomalies() {
+  const tbody = document.getElementById('anomalies-table-body');
+  if (!tbody) return;
+  
+  const anomalies = detectAnomalies();
+  tbody.innerHTML = "";
+  
+  if (anomalies.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="4" style="text-align:center; color:#666;">
+          No unusual expenses detected
+        </td>
+      </tr>
+    `;
+    return;
+  }
+  
+  const total = expenses.reduce((sum, e) => sum + e.amount, 0);
+  const average = total / expenses.length;
+  
+  anomalies.forEach(exp => {
+    const row = document.createElement('tr');
+    row.innerHTML = `
+      <td>${exp.date}</td>
+      <td>${exp.category}</td>
+      <td>${exp.amount.toFixed(2)}</td>
+      <td>Unusually high (more than 2× your average)</td>
+    `;
+    tbody.appendChild(row);
+  });
+}
+
+// ===============================
+// RENDER CATEGORY BUDGET SUMMARY
+// ===============================
+
+function renderCategoryBudgetSummary() {
+  const tbody = document.getElementById('category-budget-summary-body');
+  if (!tbody) return;
+  
+  tbody.innerHTML = "";
+  
+  if (!categoryBudgets || Object.keys(categoryBudgets).length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="5" style="text-align:center; color:#666;">
+          No category budgets set yet
+        </td>
+      </tr>
+    `;
+    return;
+  }
+  
+  const categoryTotals = getCategoryTotals();
+  
+  for (const category in categoryBudgets) {
+    const budget = categoryBudgets[category];
+    const spent = categoryTotals[category] || 0;
+    const remaining = budget - spent;
+    
+    let status = "Under control";
+    if (spent > budget) {
+      status = "Exceeded";
+    } else if (spent >= budget * 0.8) {
+      status = "Near limit";
+    }
+    
+    const row = document.createElement('tr');
+    row.innerHTML = `
+      <td>${category}</td>
+      <td>${budget.toFixed(2)}</td>
+      <td>${spent.toFixed(2)}</td>
+      <td>${remaining.toFixed(2)}</td>
+      <td>${status}</td>
+    `;
+    tbody.appendChild(row);
+  }
+}
+
+// ===============================
+// MONTHLY FINANCIAL SUMMARY
+// ===============================
+
+function generateMonthlySummary() {
+  const now = new Date();
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+  
+  const currentMonthExpenses = expenses.filter(exp => {
+    const expDate = new Date(exp.date);
+    return expDate.getMonth() === currentMonth &&
+           expDate.getFullYear() === currentYear;
+  });
+  
+  const prevMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+  const prevYear = currentMonth === 0 ? currentYear - 1 : currentYear;
+  
+  const previousMonthExpenses = expenses.filter(exp => {
+    const expDate = new Date(exp.date);
+    return expDate.getMonth() === prevMonth &&
+           expDate.getFullYear() === prevYear;
+  });
+  
+  const currentTotal = currentMonthExpenses.reduce((sum, e) => sum + e.amount, 0);
+  const previousTotal = previousMonthExpenses.reduce((sum, e) => sum + e.amount, 0);
+  
+  const categoryTotals = {};
+  currentMonthExpenses.forEach(exp => {
+    categoryTotals[exp.category] = (categoryTotals[exp.category] || 0) + exp.amount;
+  });
+  
+  const topCategory = Object.entries(categoryTotals)
+    .sort((a, b) => b[1] - a[1])[0] || ['N/A', 0];
+  
+  const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+  const currentDay = now.getDate();
+  const dailyAverage = currentTotal / currentDay;
+  const projectedTotal = dailyAverage * daysInMonth;
+  
+  const monthChange = currentTotal - previousTotal;
+  const monthChangePercent = previousTotal > 0
+    ? ((monthChange / previousTotal) * 100).toFixed(1)
+    : 0;
+  
+  const budgetRemaining = monthlyBudget ? (monthlyBudget - currentTotal) : null;
+  const budgetUsedPercent = monthlyBudget
+    ? ((currentTotal / monthlyBudget) * 100).toFixed(1)
+    : null;
+  
+  return {
+    currentMonth: now.toLocaleString('default', { month: 'long', year: 'numeric' }),
+    currentTotal,
+    previousTotal,
+    monthChange,
+    monthChangePercent,
+    expenseCount: currentMonthExpenses.length,
+    dailyAverage,
+    projectedTotal,
+    topCategory: topCategory[0],
+    topCategoryAmount: topCategory[1],
+    categoryTotals,
+    budgetRemaining,
+    budgetUsedPercent,
+    daysRemaining: daysInMonth - currentDay
+  };
+}
+
+function renderMonthlySummary() {
+  const container = document.getElementById('monthly-summary-container');
+  if (!container) return;
+  
+  const summary = generateMonthlySummary();
+  
+  let budgetStatusHTML = '';
+  if (monthlyBudget) {
+    const statusColor = summary.budgetRemaining >= 0 ? '#28a745' : '#dc3545';
+    const statusIcon = summary.budgetRemaining >= 0 ? '✅' : '⚠️';
+    
+    budgetStatusHTML = `
+      <div class="summary-card" style="border-left: 4px solid ${statusColor};">
+        <h4>${statusIcon} Budget Status</h4>
+        <p class="summary-big-number" style="color: ${statusColor};">
+          ₹${Math.abs(summary.budgetRemaining).toFixed(2)}
+        </p>
+        <p class="summary-label">
+          ${summary.budgetRemaining >= 0 ? 'Remaining' : 'Exceeded'}
+        </p>
+        <p class="summary-detail">
+          ${summary.budgetUsedPercent}% of ₹${monthlyBudget} budget used
+        </p>
+        <p class="summary-detail">
+          ${summary.daysRemaining} days remaining this month
+        </p>
+      </div>
+    `;
+  }
+  
+  const trendColor = summary.monthChange > 0 ? '#dc3545' : '#28a745';
+  const trendIcon = summary.monthChange > 0 ? '📈' : '📉';
+  const trendText = summary.monthChange > 0 ? 'increase' : 'decrease';
+  
+  container.innerHTML = `
+    <div class="summary-grid">
+      <div class="summary-card">
+        <h4>💰 Total Spending</h4>
+        <p class="summary-big-number">₹${summary.currentTotal.toFixed(2)}</p>
+        <p class="summary-label">${summary.currentMonth}</p>
+        <p class="summary-detail">${summary.expenseCount} transactions</p>
+      </div>
+      
+      ${budgetStatusHTML}
+      
+      <div class="summary-card">
+        <h4>${trendIcon} Monthly Trend</h4>
+        <p class="summary-big-number" style="color: ${trendColor};">
+          ${summary.monthChange >= 0 ? '+' : ''}₹${summary.monthChange.toFixed(2)}
+        </p>
+        <p class="summary-label">${Math.abs(summary.monthChangePercent)}% ${trendText}</p>
+        <p class="summary-detail">vs. previous month (₹${summary.previousTotal.toFixed(2)})</p>
+      </div>
+      
+      <div class="summary-card">
+        <h4>📊 Daily Average</h4>
+        <p class="summary-big-number">₹${summary.dailyAverage.toFixed(2)}</p>
+        <p class="summary-label">per day this month</p>
+        <p class="summary-detail">
+          Projected total: ₹${summary.projectedTotal.toFixed(2)}
+        </p>
+      </div>
+      
+      <div class="summary-card">
+        <h4>🏆 Highest Spending</h4>
+        <p class="summary-big-number">₹${summary.topCategoryAmount.toFixed(2)}</p>
+        <p class="summary-label">${summary.topCategory}</p>
+        <p class="summary-detail">
+          ${summary.currentTotal > 0 ? ((summary.topCategoryAmount / summary.currentTotal) * 100).toFixed(1) : 0}% of total
+        </p>
+      </div>
+      
+      <div class="summary-card summary-card-wide">
+        <h4>📋 Category Breakdown</h4>
+        <div class="category-breakdown">
+          ${Object.entries(summary.categoryTotals).length > 0
+            ? Object.entries(summary.categoryTotals)
+                .sort((a, b) => b[1] - a[1])
+                .map(([cat, amount]) => {
+                  const percent = ((amount / summary.currentTotal) * 100).toFixed(1);
+                  return `
+                    <div class="category-row">
+                      <span class="category-name">${cat}</span>
+                      <div class="category-bar-container">
+                        <div class="category-bar" style="width: ${percent}%"></div>
+                      </div>
+                      <span class="category-amount">₹${amount.toFixed(2)} (${percent}%)</span>
+                    </div>
+                  `;
+                }).join('')
+            : '<p style="text-align:center; color:#666;">No expenses this month</p>'
+          }
+        </div>
+      </div>
+    </div>
+  `;
+}
+// ===============================
+// RENDER BEFA FINANCIAL METRICS
+// ===============================
+function renderBEFAMetrics() {
+  const container = document.getElementById('befa-metrics-container');
+  if (!container) return;
+
+  const savingsRate = calculateSavingsRate();
+  const complianceScore = calculateBudgetComplianceScore();
+  const categoryRatios = calculateCategoryExpenseRatios();
+  const burnRate = calculateBurnRate();
+  const projection = projectMonthEndSpending();
+
+  let metricsHTML = '<div class="befa-metrics-grid">';
+
+  // 1. SAVINGS RATE
+  if (savingsRate) {
+    const rateColor = savingsRate.rate >= 20 ? '#28a745' : 
+                      savingsRate.rate >= 10 ? '#ffc107' : '#dc3545';
+    const rateIcon = savingsRate.rate >= 20 ? '💰' : 
+                     savingsRate.rate >= 10 ? '⚠️' : '🚨';
+
+    metricsHTML += `
+      <div class="befa-metric-card">
+        <h4>${rateIcon} Savings Rate</h4>
+        <p class="befa-big-number" style="color: ${rateColor};">
+          ${savingsRate.rate.toFixed(1)}%
+        </p>
+        <p class="befa-detail">
+          Saved: ₹${savingsRate.saved.toFixed(2)} of ₹${savingsRate.budget.toFixed(2)}
+        </p>
+        <p class="befa-description">
+          ${savingsRate.rate >= 20 ? 'Excellent savings behavior!' : 
+            savingsRate.rate >= 10 ? 'Moderate savings. Try to improve.' : 
+            'Low savings rate. Review expenses.'}
+        </p>
+      </div>
+    `;
+  }
+
+  // 2. BUDGET COMPLIANCE SCORE
+  const scoreColor = complianceScore >= 80 ? '#28a745' : 
+                     complianceScore >= 60 ? '#ffc107' : '#dc3545';
+  const scoreIcon = complianceScore >= 80 ? '✅' : 
+                    complianceScore >= 60 ? '⚠️' : '❌';
+
+  metricsHTML += `
+    <div class="befa-metric-card">
+      <h4>${scoreIcon} Budget Health Score</h4>
+      <p class="befa-big-number" style="color: ${scoreColor};">
+        ${complianceScore}/100
+      </p>
+      <p class="befa-detail">
+        ${complianceScore >= 80 ? 'Excellent' : 
+          complianceScore >= 60 ? 'Good' : 
+          complianceScore >= 40 ? 'Fair' : 'Needs Improvement'}
+      </p>
+      <p class="befa-description">
+        Performance measurement based on budget adherence, anomalies, and category compliance
+      </p>
+    </div>
+  `;
+
+  // 3. BURN RATE
+  if (burnRate.daysElapsed > 0) {
+    metricsHTML += `
+      <div class="befa-metric-card">
+        <h4>🔥 Daily Burn Rate</h4>
+        <p class="befa-big-number">
+          ₹${burnRate.dailyAverage.toFixed(2)}
+        </p>
+        <p class="befa-detail">
+          Average daily spending
+        </p>
+        <p class="befa-description">
+          Total spent: ₹${burnRate.totalSpent.toFixed(2)} over ${burnRate.daysElapsed} days
+        </p>
+      </div>
+    `;
+  }
+
+  // 4. PROJECTED MONTH-END SPENDING
+  if (projection) {
+    const projColor = projection.willExceedBudget ? '#dc3545' : '#28a745';
+    const projIcon = projection.willExceedBudget ? '📈' : '📊';
+
+    metricsHTML += `
+      <div class="befa-metric-card">
+        <h4>${projIcon} Month-End Forecast</h4>
+        <p class="befa-big-number" style="color: ${projColor};">
+          ₹${projection.projectedTotal.toFixed(2)}
+        </p>
+        <p class="befa-detail">
+          ${projection.daysRemaining} days remaining
+        </p>
+        <p class="befa-description">
+          ${projection.willExceedBudget ? 
+            `⚠️ May exceed budget by ₹${projection.excessAmount.toFixed(2)}` : 
+            '✅ On track to stay within budget'}
+        </p>
+      </div>
+    `;
+  }
+
+  // 5. CATEGORY EXPENSE RATIOS (Full Width)
+  if (categoryRatios && categoryRatios.length > 0) {
+    metricsHTML += `
+      <div class="befa-metric-card befa-card-wide">
+        <h4>📊 Category Budget Utilization</h4>
+        <div class="category-ratios">
+    `;
+
+    categoryRatios.forEach(cat => {
+      const barColor = cat.status === 'exceeded' ? '#dc3545' : 
+                       cat.status === 'warning' ? '#ffc107' : '#28a745';
+      const statusIcon = cat.status === 'exceeded' ? '🚨' : 
+                         cat.status === 'warning' ? '⚠️' : '✅';
+
+      metricsHTML += `
+        <div class="category-ratio-row">
+          <div class="ratio-header">
+            <span class="ratio-category">${statusIcon} ${cat.category}</span>
+            <span class="ratio-percent" style="color: ${barColor};">
+              ${cat.ratio.toFixed(1)}%
+            </span>
+          </div>
+          <div class="ratio-bar-container">
+            <div class="ratio-bar" style="width: ${Math.min(100, cat.ratio)}%; background: ${barColor};"></div>
+          </div>
+          <div class="ratio-details">
+            <span>₹${cat.spent.toFixed(2)} / ₹${cat.budget.toFixed(2)}</span>
+            <span style="color: ${cat.remaining >= 0 ? '#28a745' : '#dc3545'};">
+              ${cat.remaining >= 0 ? 'Remaining' : 'Exceeded'}: ₹${Math.abs(cat.remaining).toFixed(2)}
+            </span>
+          </div>
+        </div>
+      `;
+    });
+
+    metricsHTML += `
+        </div>
+      </div>
+    `;
+  }
+
+  metricsHTML += '</div>';
+  container.innerHTML = metricsHTML;
+}
+
+// ===============================
+// RENDER ADVANCED ANALYTICS DASHBOARD
+// ADD this function after renderBEFAMetrics()
+// ===============================
+
+function renderAdvancedAnalytics() {
+  const container = document.getElementById('advanced-analytics-container');
+  if (!container) return;
+
+  // Check if we have enough data
+  if (expenses.length < 5) {
+    container.innerHTML = `
+      <div style="text-align: center; padding: 40px; color: #888;">
+        <p style="font-size: 48px; margin: 0;">📊</p>
+        <p style="font-size: 16px; margin: 10px 0;">Add more expenses to see advanced analytics</p>
+        <p style="font-size: 14px; color: #aaa;">Minimum 5 expenses required</p>
+      </div>
+    `;
+    return;
+  }
+
+  const report = generateFinancialHealthReport();
+  
+  let html = '<div class="analytics-dashboard">';
+
+  // ========================================
+  // 1. WEEK-OVER-WEEK COMPARISON
+  // ========================================
+  if (report.weekComparison) {
+    const wk = report.weekComparison;
+    const trendColor = wk.trend === 'increase' ? '#dc3545' : wk.trend === 'decrease' ? '#28a745' : '#6c757d';
+    const trendIcon = wk.trend === 'increase' ? '📈' : wk.trend === 'decrease' ? '📉' : '➡️';
+    
+    html += `
+      <div class="analytics-card analytics-card-wide">
+        <h3>📊 Week-over-Week Comparison</h3>
+        <div class="week-comparison-grid">
+          <div class="week-box">
+            <div class="week-label">This Week</div>
+            <div class="week-amount">₹${wk.currentWeek.total.toFixed(2)}</div>
+            <div class="week-detail">${wk.currentWeek.count} transactions</div>
+          </div>
+          
+          <div class="week-arrow" style="color: ${trendColor};">
+            <div style="font-size: 32px;">${trendIcon}</div>
+            <div style="font-size: 14px; font-weight: 600;">
+              ${wk.percentChange >= 0 ? '+' : ''}${wk.percentChange.toFixed(1)}%
+            </div>
+          </div>
+          
+          <div class="week-box">
+            <div class="week-label">Last Week</div>
+            <div class="week-amount">₹${wk.lastWeek.total.toFixed(2)}</div>
+            <div class="week-detail">${wk.lastWeek.count} transactions</div>
+          </div>
+        </div>
+        
+        <div class="week-insight">
+          ${Math.abs(wk.difference) > 0 
+            ? `You spent ₹${Math.abs(wk.difference).toFixed(2)} ${wk.trend === 'increase' ? 'more' : 'less'} this week compared to last week` 
+            : 'Your spending is consistent with last week'}
+        </div>
+      </div>
+    `;
+  }
+
+  // ========================================
+  // 2. SPENDING PATTERNS
+  // ========================================
+  if (report.patterns) {
+    const patterns = report.patterns;
+    const insights = report.patternInsights;
+    
+    html += `
+      <div class="analytics-card">
+        <h3>🔍 Spending Patterns</h3>
+        
+        <div class="pattern-item">
+          <div class="pattern-icon">🏆</div>
+          <div class="pattern-content">
+            <div class="pattern-label">Peak Spending Day</div>
+            <div class="pattern-value">${patterns.peakDay.name}</div>
+            <div class="pattern-detail">₹${patterns.peakDay.total.toFixed(2)} total</div>
+          </div>
+        </div>
+        
+        <div class="pattern-item">
+          <div class="pattern-icon">${patterns.weekendVsWeekday.tendency === 'weekend' ? '🎉' : '💼'}</div>
+          <div class="pattern-content">
+            <div class="pattern-label">Spending Tendency</div>
+            <div class="pattern-value">${patterns.weekendVsWeekday.tendency === 'weekend' ? 'Weekend Spender' : 'Weekday Spender'}</div>
+            <div class="pattern-detail">
+              ${patterns.weekendVsWeekday.tendency === 'weekend' 
+                ? `₹${patterns.weekendVsWeekday.weekendAverage.toFixed(2)}/day on weekends`
+                : `₹${patterns.weekendVsWeekday.weekdayAverage.toFixed(2)}/day on weekdays`}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  // ========================================
+  // 3. BUDGET RECOMMENDATIONS
+  // ========================================
+  if (report.recommendations && report.recommendations.length > 0) {
+    html += `
+      <div class="analytics-card analytics-card-wide">
+        <h3>💡 Smart Budget Recommendations</h3>
+        <div class="recommendations-list">
+    `;
+    
+    report.recommendations.slice(0, 5).forEach(rec => {
+      const statusColor = rec.status === 'optimal' ? '#28a745' : 
+                          rec.status === 'too-low' ? '#dc3545' : 
+                          rec.status === 'too-high' ? '#ffc107' : '#6c757d';
+      const statusIcon = rec.status === 'optimal' ? '✅' : 
+                         rec.status === 'too-low' ? '⚠️' : 
+                         rec.status === 'too-high' ? '💡' : '📌';
+      
+      html += `
+        <div class="recommendation-item">
+          <div class="rec-header">
+            <span class="rec-category">${rec.category}</span>
+            <span class="rec-confidence" style="background: ${rec.confidence === 'high' ? '#28a745' : rec.confidence === 'medium' ? '#ffc107' : '#6c757d'};">
+              ${rec.confidence} confidence
+            </span>
+          </div>
+          <div class="rec-amounts">
+            ${rec.currentBudget 
+              ? `<div class="rec-current">Current: ₹${rec.currentBudget.toFixed(0)}</div>` 
+              : '<div class="rec-current">No budget set</div>'}
+            <div class="rec-arrow">→</div>
+            <div class="rec-suggested">Suggested: ₹${rec.recommendedBudget.toFixed(0)}</div>
+          </div>
+          <div class="rec-status" style="color: ${statusColor};">
+            ${statusIcon} ${rec.message}
+          </div>
+          <div class="rec-detail">
+            Based on ${rec.transactionCount} transactions (avg: ₹${rec.averageSpending.toFixed(2)})
+          </div>
+        </div>
+      `;
+    });
+    
+    html += `
+        </div>
+      </div>
+    `;
+  }
+
+  // ========================================
+  // 4. YEAR-TO-DATE SUMMARY
+  // ========================================
+  if (report.ytdSummary) {
+    const ytd = report.ytdSummary;
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    
+    html += `
+      <div class="analytics-card analytics-card-wide">
+        <h3>📅 Year-to-Date Summary (${ytd.year})</h3>
+        
+        <div class="ytd-stats-grid">
+          <div class="ytd-stat">
+            <div class="ytd-label">Total Spent</div>
+            <div class="ytd-value">₹${ytd.totalSpent.toFixed(2)}</div>
+          </div>
+          
+          <div class="ytd-stat">
+            <div class="ytd-label">Avg per Month</div>
+            <div class="ytd-value">₹${ytd.averageMonthlySpending.toFixed(2)}</div>
+          </div>
+          
+          <div class="ytd-stat">
+            <div class="ytd-label">Total Transactions</div>
+            <div class="ytd-value">${ytd.totalTransactions}</div>
+          </div>
+          
+          <div class="ytd-stat">
+            <div class="ytd-label">Projected Year-End</div>
+            <div class="ytd-value">₹${ytd.projectedYearEnd.toFixed(2)}</div>
+          </div>
+        </div>
+        
+        ${ytd.bestMonth && ytd.worstMonth ? `
+        <div class="ytd-months">
+          <div class="ytd-month-item">
+            <span class="ytd-month-icon">🌟</span>
+            <span class="ytd-month-label">Best Month:</span>
+            <span class="ytd-month-value">${ytd.bestMonth.name} (₹${ytd.bestMonth.total.toFixed(2)})</span>
+          </div>
+          <div class="ytd-month-item">
+            <span class="ytd-month-icon">📊</span>
+            <span class="ytd-month-label">Highest Month:</span>
+            <span class="ytd-month-value">${ytd.worstMonth.name} (₹${ytd.worstMonth.total.toFixed(2)})</span>
+          </div>
+        </div>
+        ` : ''}
+        
+        ${ytd.topCategories.length > 0 ? `
+        <div class="ytd-categories">
+          <h4 style="margin: 20px 0 10px 0; font-size: 14px; color: #666;">Top Categories</h4>
+          ${ytd.topCategories.map((cat, index) => `
+            <div class="ytd-category-row">
+              <span class="ytd-cat-rank">${index + 1}</span>
+              <span class="ytd-cat-name">${cat.category}</span>
+              <div class="ytd-cat-bar-container">
+                <div class="ytd-cat-bar" style="width: ${cat.percentage}%"></div>
+              </div>
+              <span class="ytd-cat-amount">₹${cat.total.toFixed(2)} (${cat.percentage.toFixed(1)}%)</span>
+            </div>
+          `).join('')}
+        </div>
+        ` : ''}
+      </div>
+    `;
+  }
+
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+
+
+// ===============================
+// CHARTS (PIE + BAR + LINE)
+// ===============================
+
+function renderChart() {
+  // Only re-render if data actually changed
+//  if (!hasChartDataChanged()) {
+   // console.log('⚡ Chart data unchanged - skipping render');
+   // return;
+//  }
+
+  const pieCanvas  = document.getElementById('categoryChart');
+  const barCanvas  = document.getElementById('barChart');
+  const lineCanvas = document.getElementById('lineChart');
+
+  if (!pieCanvas || !barCanvas || !lineCanvas) return;
+
+  // Category totals (for pie & bar)
+  const categoryTotals = getCategoryTotals();
+  const categoryLabels = Object.keys(categoryTotals);
+  const categoryData   = Object.values(categoryTotals);
+
+  // Aggregated data (for line chart)
+  const mode       = document.getElementById('trend-mode')?.value || 'daily';
+  const aggregated = aggregateExpenses(mode);
+  const dates      = aggregated.labels;
+  const dailyData  = aggregated.data;
+
+  // Destroy old charts
+  if (AppState.charts.pie)  AppState.charts.pie.destroy();
+  if (AppState.charts.bar)  AppState.charts.bar.destroy();
+  if (AppState.charts.line) AppState.charts.line.destroy();
+
+  // PIE CHART
+  AppState.charts.pie = new Chart(pieCanvas.getContext('2d'), {
+    type: 'pie',
+    data: {
+      labels: categoryLabels,
+      datasets: [{ data: categoryData }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true
+    }
+  });
+
+  // BAR CHART
+  AppState.charts.bar = new Chart(barCanvas.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: categoryLabels,
+      datasets: [{
+        label: 'Expenses by Category',
+        data: categoryData,
+        backgroundColor: CHART_COLORS.PRIMARY
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true
+    }
+  });
+
+  // LINE CHART
+  AppState.charts.line = new Chart(lineCanvas.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: dates,
+      datasets: [{
+        label: 'Daily Spending Trend',
+        data: dailyData,
+        borderColor: CHART_COLORS.PRIMARY,
+        backgroundColor: 'rgba(0,123,255,0.2)',
+        borderWidth: 3,
+        pointRadius: 6,
+        pointHoverRadius: 8,
+        tension: 0.3,
+        fill: true
+      }]
+    },
+    options: {
+      responsive: true
+    }
+  });
+
+  // Sync chart instances to legacy variables
+  pieChart  = AppState.charts.pie;
+  barChart  = AppState.charts.bar;
+  lineChart = AppState.charts.line;
+
+  //console.log('✅ Charts rendered');
+}
+
+// ===============================
+// EXPORT CSV
+// ===============================
+
+function exportCSV() {
+  if (expenses.length === 0) {
+    alert("No data to export");
+    return;
+  }
+  
+  let csv = "Date,Category,Amount\n";
+  expenses.forEach(e => {
+    csv += `${e.date},${e.category},${e.amount}\n`;
+  });
+  
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = "expenses.csv";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ===============================
+// GLOBAL FUNCTION EXPORTS
+// ===============================
+
+window.startEditExpense = startEditExpense;
+window.saveEditedExpense = saveEditedExpense;
+window.cancelEdit = cancelEdit;
+window.deleteExpense = deleteExpense;
